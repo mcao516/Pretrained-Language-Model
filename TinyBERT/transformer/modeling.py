@@ -343,7 +343,7 @@ class BertEmbeddings(nn.Module):
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, token_type_ids=None):
@@ -437,7 +437,7 @@ class BertSelfOutput(nn.Module):
     def __init__(self, config):
         super(BertSelfOutput, self).__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -474,7 +474,7 @@ class BertOutput(nn.Module):
                 config.intermediate_size, config.hidden_size)
         else:
             self.dense = nn.Linear(intermediate_size, config.hidden_size)
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -826,13 +826,12 @@ class BertModel(BertPreTrainedModel):
         # Since we are adding it to the raw scores before the softmax, this is
         # effectively the same as removing these entirely.
         extended_attention_mask = extended_attention_mask.to(
-            dtype=next(self.parameters()).dtype)  # fp16 compatibility
+            dtype=input_ids.dtype)  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
         embedding_output = self.embeddings(input_ids, token_type_ids)
         encoded_layers, layer_atts = self.encoder(embedding_output,
                                                   extended_attention_mask)
-
         pooled_output = self.pooler(encoded_layers)
         if not output_all_encoded_layers:
             encoded_layers = encoded_layers[-1]
@@ -1128,7 +1127,7 @@ class TinyBertForSequenceClassification(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None,
                 labels=None, is_student=False):
-
+        # pooled_output: [batch_size, hidden_size]
         sequence_output, att_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask,
                                                                output_all_encoded_layers=True, output_att=True)
 
@@ -1139,4 +1138,4 @@ class TinyBertForSequenceClassification(BertPreTrainedModel):
             for s_id, sequence_layer in enumerate(sequence_output):
                 tmp.append(self.fit_dense(sequence_layer))
             sequence_output = tmp
-        return logits, att_output, sequence_output
+        return logits, att_output, sequence_output, pooled_output

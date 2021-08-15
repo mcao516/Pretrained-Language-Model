@@ -285,6 +285,8 @@ def main():
 
     args = parser.parse_args()
     # logger.info(args)
+    
+    print(args.task_name)
 
     default_params = {
         "CoLA": {"N": 30},
@@ -312,7 +314,8 @@ def main():
     # Do data augmentation
     processor = AugmentProcessor(data_augmentor, args.glue_dir, args.task_name)
     processor.read_augment_write()
-
+    
+    print('- done.')
 
 if __name__ == "__main__":
     main()

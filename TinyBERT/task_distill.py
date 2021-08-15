@@ -29,6 +29,7 @@ import sys
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from tqdm import tqdm, trange
@@ -133,6 +134,7 @@ class MrpcProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
     def get_aug_examples(self, data_dir):
+        print('test')
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
 
@@ -175,7 +177,7 @@ class MnliProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["contradiction", "entailment", "neutral"]
+        return ["entailment", "neutral", "contradiction"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -603,6 +605,7 @@ def result_to_file(result, file_name):
             logger.info("  %s = %s", key, str(result[key]))
             writer.write("%s = %s\n" % (key, str(result[key])))
 
+# ========================= START FROM HERE  ==================================
 
 def do_eval(model, task_name, eval_dataloader,
             device, output_mode, eval_labels, num_labels):
@@ -615,7 +618,7 @@ def do_eval(model, task_name, eval_dataloader,
         with torch.no_grad():
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch_
 
-            logits, _, _ = model(input_ids, segment_ids, input_mask)
+            logits, _, _, _ = model(input_ids, segment_ids, input_mask)
 
         # create eval loss and other metric required by the task
         if output_mode == "classification":
@@ -733,6 +736,8 @@ def main():
                         type=int,
                         default=50)
     parser.add_argument('--pred_distill',
+                        action='store_true')
+    parser.add_argument('--similarity_distill',
                         action='store_true')
     parser.add_argument('--data_url',
                         type=str,
@@ -903,8 +908,8 @@ def main():
         loss_mse = MSELoss()
 
         def soft_cross_entropy(predicts, targets):
-            student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
-            targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+            student_likelihood = F.log_softmax(predicts, dim=-1)
+            targets_prob = F.softmax(targets, dim=-1)
             return (- targets_prob * student_likelihood).mean()
 
         # Train and evaluate
@@ -932,13 +937,40 @@ def main():
                 rep_loss = 0.
                 cls_loss = 0.
 
-                student_logits, student_atts, student_reps = student_model(input_ids, segment_ids, input_mask,
+                # teacher_logits, student_logits: [batch_size, label_num]
+                # student_pooled, teacher_pooled: [batch_size, hidden_size]
+                student_logits, student_atts, student_reps, student_pooled = student_model(input_ids, segment_ids, input_mask,
                                                                            is_student=True)
 
                 with torch.no_grad():
-                    teacher_logits, teacher_atts, teacher_reps = teacher_model(input_ids, segment_ids, input_mask)
+                    teacher_logits, teacher_atts, teacher_reps, teacher_pooled = teacher_model(input_ids, segment_ids, input_mask)
 
-                if not args.pred_distill:
+                if args.pred_distill:
+                    if output_mode == "classification":
+                        cls_loss = soft_cross_entropy(student_logits / args.temperature,
+                                                      teacher_logits / args.temperature)
+                    elif output_mode == "regression":
+                        loss_mse = MSELoss()
+                        cls_loss = loss_mse(student_logits.view(-1), label_ids.view(-1))
+
+                    loss = cls_loss
+                    tr_cls_loss += cls_loss.item()
+
+                elif args.similarity_distill:
+                    teacher_pooled = F.normalize(teacher_pooled, p=2, dim=1).detach()
+                    student_pooled = F.normalize(student_pooled, p=2, dim=1)
+
+                    tt_product = torch.matmul(teacher_pooled, teacher_pooled.T)
+                    # tt_similarity = F.softmax(tt_product, dim=1)
+                    st_product = torch.matmul(student_pooled, teacher_pooled.T)
+                    # st_similarity = F.softmax(st_product, dim=1)
+
+                    sim_loss = soft_cross_entropy(st_product, tt_product)
+                    
+                    loss = sim_loss
+                    tr_cls_loss += sim_loss.item()
+
+                else:
                     teacher_layer_num = len(teacher_atts)
                     student_layer_num = len(student_atts)
                     assert teacher_layer_num % student_layer_num == 0
@@ -964,16 +996,6 @@ def main():
                     loss = rep_loss + att_loss
                     tr_att_loss += att_loss.item()
                     tr_rep_loss += rep_loss.item()
-                else:
-                    if output_mode == "classification":
-                        cls_loss = soft_cross_entropy(student_logits / args.temperature,
-                                                      teacher_logits / args.temperature)
-                    elif output_mode == "regression":
-                        loss_mse = MSELoss()
-                        cls_loss = loss_mse(student_logits.view(-1), label_ids.view(-1))
-
-                    loss = cls_loss
-                    tr_cls_loss += cls_loss.item()
 
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
@@ -1005,7 +1027,7 @@ def main():
                     rep_loss = tr_rep_loss / (step + 1)
 
                     result = {}
-                    if args.pred_distill:
+                    if args.pred_distill or args.similarity_distill:
                         result = do_eval(student_model, task_name, eval_dataloader,
                                          device, output_mode, eval_labels, num_labels)
                     result['global_step'] = global_step
@@ -1049,7 +1071,7 @@ def main():
                         tokenizer.save_vocabulary(args.output_dir)
 
                         # Test mnli-mm
-                        if args.pred_distill and task_name == "mnli":
+                        if (args.pred_distill or args.similarity_distill) and task_name == "mnli":
                             task_name = "mnli-mm"
                             processor = processors[task_name]()
                             if not os.path.exists(args.output_dir + '-MM'):
