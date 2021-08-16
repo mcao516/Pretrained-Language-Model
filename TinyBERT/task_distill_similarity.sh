@@ -17,7 +17,8 @@ python task_distill.py --similarity_distill \
                        --aug_train \
                        --do_lower_case \
                        --learning_rate 3e-5 \
-                       --num_train_epochs 5 \
-                       --eval_step 2000 \
+                       --num_train_epochs 10 \
+                       --eval_step 300 \
                        --max_seq_length 128 \
-                       --train_batch_size 128;
+                       --train_batch_size 32 \
+                       --sample_n_example 256;

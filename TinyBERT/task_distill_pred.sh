@@ -3,9 +3,9 @@ source ~/env37/bin/activate
 
 TASK_NAME=MNLI
 FT_BERT_BASE_DIR=/home/mcao610/scratch/huggingface/MNLI/uncased/
-TMP_TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/MNLI/intermediate
+TMP_TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/MNLI/similarity
 TASK_DIR=/home/mcao610/scratch/glue_data/${TASK_NAME}
-TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/final  # output directory
+TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/test  # output directory
 
 mkdir $TINYBERT_DIR
 python task_distill.py --pred_distill \

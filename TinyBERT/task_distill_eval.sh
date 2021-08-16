@@ -2,7 +2,7 @@
 source ~/env37/bin/activate
 
 TASK_NAME=MNLI
-TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/final
+TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/final-similarity
 TASK_DIR=/home/mcao610/scratch/glue_data/${TASK_NAME}
 OUTPUT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/eval  # output directory
 

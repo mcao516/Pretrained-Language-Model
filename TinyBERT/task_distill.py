@@ -605,6 +605,24 @@ def result_to_file(result, file_name):
             logger.info("  %s = %s", key, str(result[key]))
             writer.write("%s = %s\n" % (key, str(result[key])))
 
+
+def sample_examples(tensor_data, n_example):
+    """Randomly sample n examples from tensor data."""
+    N = len(tensor_data)
+    assert N > n_example and n_example > 0, "Invalid n_example: {}".format(n_example)
+
+    indices = np.random.choice(N, n_example)
+    sampled_examples = []
+    for i in indices:
+        sampled_examples.append(tensor_data[i])
+
+    returns = []
+    assert len(sampled_examples[0]) == 5
+    for f in range(len(sampled_examples[0])):
+        returns.append(torch.stack([e[f] for e in sampled_examples]))
+
+    return tuple(returns)
+
 # ========================= START FROM HERE  ==================================
 
 def do_eval(model, task_name, eval_dataloader,
@@ -699,6 +717,10 @@ def main():
                         default=32,
                         type=int,
                         help="Total batch size for eval.")
+    parser.add_argument("--sample_n_example",
+                        default=100,
+                        type=int,
+                        help="Number of examples to sample for similarity distillation.")
     parser.add_argument("--learning_rate",
                         default=5e-5,
                         type=float,
@@ -864,6 +886,7 @@ def main():
 
     student_model = TinyBertForSequenceClassification.from_pretrained(args.student_model, num_labels=num_labels)
     student_model.to(device)
+
     if args.do_eval:
         logger.info("***** Running evaluation *****")
         logger.info("  Num examples = %d", len(eval_examples))
@@ -872,9 +895,29 @@ def main():
         student_model.eval()
         result = do_eval(student_model, task_name, eval_dataloader,
                          device, output_mode, eval_labels, num_labels)
-        logger.info("***** Eval results *****")
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(result[key]))
+
+        if task_name == "mnli":
+            processor = processors["mnli-mm"]()
+
+            eval_examples = processor.get_dev_examples(args.data_dir)
+            eval_features = convert_examples_to_features(
+                eval_examples, label_list, args.max_seq_length, tokenizer, output_mode)
+            eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
+
+            logger.info("***** Running mm evaluation *****")
+            logger.info("  Num examples = %d", len(eval_examples))
+            logger.info("  Batch size = %d", args.eval_batch_size)
+
+            eval_sampler = SequentialSampler(eval_data)
+            eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
+                                            batch_size=args.eval_batch_size)
+
+            result = do_eval(student_model, task_name, eval_dataloader,
+                             device, output_mode, eval_labels, num_labels)
+            for key in sorted(result.keys()):
+                logger.info("  %s = %s", key, str(result[key]))
     else:
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
@@ -940,7 +983,7 @@ def main():
                 # teacher_logits, student_logits: [batch_size, label_num]
                 # student_pooled, teacher_pooled: [batch_size, hidden_size]
                 student_logits, student_atts, student_reps, student_pooled = student_model(input_ids, segment_ids, input_mask,
-                                                                           is_student=True)
+                                                                                           is_student=True)
 
                 with torch.no_grad():
                     teacher_logits, teacher_atts, teacher_reps, teacher_pooled = teacher_model(input_ids, segment_ids, input_mask)
@@ -957,13 +1000,19 @@ def main():
                     tr_cls_loss += cls_loss.item()
 
                 elif args.similarity_distill:
+                    sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(train_data, args.sample_n_example)
+
+                    with torch.no_grad():
+                        _, _, _, sampled_pooled = teacher_model(sampled_ids, sampled_seg, sampled_mask)
+
+                    # sampled_pooled: [n_examples, hidden_size]
+                    # teacher_pooled: [batch_size, hidden_size]
+                    sampled_pooled = F.normalize(sampled_pooled, p=2, dim=1).detach()
                     teacher_pooled = F.normalize(teacher_pooled, p=2, dim=1).detach()
                     student_pooled = F.normalize(student_pooled, p=2, dim=1)
 
-                    tt_product = torch.matmul(teacher_pooled, teacher_pooled.T)
-                    # tt_similarity = F.softmax(tt_product, dim=1)
-                    st_product = torch.matmul(student_pooled, teacher_pooled.T)
-                    # st_similarity = F.softmax(st_product, dim=1)
+                    tt_product = torch.matmul(teacher_pooled, sampled_pooled.T)
+                    st_product = torch.matmul(student_pooled, sampled_pooled.T)
 
                     sim_loss = soft_cross_entropy(st_product, tt_product)
                     
@@ -1040,6 +1089,8 @@ def main():
 
                     if not args.pred_distill:
                         save_model = True
+                    elif args.similarity_distill:
+                        save_model = True
                     else:
                         save_model = False
 
@@ -1071,7 +1122,7 @@ def main():
                         tokenizer.save_vocabulary(args.output_dir)
 
                         # Test mnli-mm
-                        if (args.pred_distill or args.similarity_distill) and task_name == "mnli":
+                        if args.pred_distill and task_name == "mnli":
                             task_name = "mnli-mm"
                             processor = processors[task_name]()
                             if not os.path.exists(args.output_dir + '-MM'):
