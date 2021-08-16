@@ -5,7 +5,7 @@ TASK_NAME=MNLI
 FT_BERT_BASE_DIR=/home/mcao610/scratch/huggingface/MNLI/uncased/
 TMP_TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/intermediate 
 TASK_DIR=/home/mcao610/scratch/glue_data/${TASK_NAME}
-TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/similarity  # output directory
+TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/similarity-256  # output directory
 
 mkdir $TINYBERT_DIR
 python task_distill.py --similarity_distill \
@@ -18,7 +18,7 @@ python task_distill.py --similarity_distill \
                        --do_lower_case \
                        --learning_rate 3e-5 \
                        --num_train_epochs 10 \
-                       --eval_step 300 \
+                       --eval_step 1000 \
                        --max_seq_length 128 \
                        --train_batch_size 32 \
                        --sample_n_example 256;
