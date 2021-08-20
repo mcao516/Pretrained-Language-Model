@@ -4,3 +4,4 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.out
+TinyBERT/debug_layer_loss.log
