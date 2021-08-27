@@ -7,3 +7,4 @@ __pycache__/
 *.out
 TinyBERT/debug_layer_loss.log
 *.png
+*.json
