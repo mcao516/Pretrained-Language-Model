@@ -135,6 +135,7 @@ class MrpcProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
     def get_aug_examples(self, data_dir):
+        print('test')
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
 
@@ -173,7 +174,7 @@ class MnliProcessor(DataProcessor):
 
     def get_aug_examples(self, data_dir):
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
+            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "train")
 
     def get_labels(self):
         """See base class."""
@@ -219,7 +220,7 @@ class ColaProcessor(DataProcessor):
 
     def get_aug_examples(self, data_dir):
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
+            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "train")
 
     def get_labels(self):
         """See base class."""
@@ -494,14 +495,13 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
         assert len(segment_ids) == max_seq_length
 
         if output_mode == "classification":
-            if cluster_map is not None:
-                label_id = cluster_map[example.guid]
-            else:
-                label_id = label_map[example.label]
+            # if cluster_map is not None:
+            #     label_id = cluster_map[example.guid]
+            # else:
+            #     label_id = label_map[example.label]
+            label_id = cluster_map[example.guid]
         elif output_mode == "regression":
             label_id = float(example.label)
-        elif output_mode == "clustering":
-            raise NotImplementedError()
         else:
             raise KeyError(output_mode)
 
@@ -666,6 +666,7 @@ def do_eval(model, task_name, eval_dataloader,
         preds = np.argmax(preds, axis=1)
     elif output_mode == "regression":
         preds = np.squeeze(preds)
+
     result = compute_metrics(task_name, preds, eval_labels.numpy())
     result['eval_loss'] = eval_loss
 
@@ -683,11 +684,6 @@ def main():
                         default=None,
                         type=str,
                         help="The teacher model dir.")
-    parser.add_argument("--student_model",
-                        default=None,
-                        type=str,
-                        required=True,
-                        help="The student model dir.")
     parser.add_argument("--task_name",
                         default=None,
                         type=str,
@@ -765,8 +761,6 @@ def main():
     parser.add_argument('--k',
                         type=int,
                         default=10)
-    parser.add_argument('--pred_distill',
-                        action='store_true')
     parser.add_argument('--similarity_distill',
                         action='store_true')
     parser.add_argument('--data_url',
@@ -848,7 +842,7 @@ def main():
     if task_name in default_params:
         args.max_seq_len = default_params[task_name]["max_seq_length"]
 
-    if not args.pred_distill and not args.do_eval:
+    if not args.do_eval:
         if task_name in default_params:
             args.num_train_epoch = default_params[task_name]["num_train_epochs"]
 
@@ -857,18 +851,20 @@ def main():
 
     # load cluster map
     cluster_map_path = 'clusters/cluster_mnli_k{}.json'.format(args.k)
+
     cluster_map = None
     with open(cluster_map_path) as f:
         cluster_map = json.load(f)
         logger.info("cluster map loaded from: {}".format(cluster_map_path))
-
+    
     processor = processors[task_name]()
     output_mode = output_modes[task_name]
     label_list = processor.get_labels()
     num_labels = args.k if cluster_map is not None else len(label_list)
 
-    tokenizer = BertTokenizer.from_pretrained(args.student_model, do_lower_case=args.do_lower_case)
+    tokenizer = BertTokenizer.from_pretrained(args.teacher_model, do_lower_case=args.do_lower_case)
 
+    # load training set
     if not args.do_eval:
         if not args.aug_train:
             train_examples = processor.get_train_examples(args.data_dir)
@@ -886,10 +882,11 @@ def main():
 
         train_features = convert_examples_to_features(train_examples, label_list,
                                                       args.max_seq_length, tokenizer, output_mode, cluster_map)
-        train_data, _ = get_tensor_data(output_mode, train_features)
+        train_data, train_labels = get_tensor_data(output_mode, train_features)
         train_sampler = RandomSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
+    # load evaluation set
     eval_examples = processor.get_dev_examples(args.data_dir)
     eval_features = convert_examples_to_features(eval_examples, label_list,
                                                  args.max_seq_length, tokenizer, output_mode, cluster_map)
@@ -897,20 +894,16 @@ def main():
     eval_sampler = SequentialSampler(eval_data)
     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
-    if not args.do_eval:
-        teacher_model = TinyBertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
-        teacher_model.to(device)
-
-    student_model = TinyBertForSequenceClassification.from_pretrained(args.student_model, num_labels=num_labels)
-    student_model.to(device)
+    teacher_model = TinyBertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
+    teacher_model.to(device)
 
     if args.do_eval:
         logger.info("***** Running evaluation *****")
         logger.info("  Num examples = %d", len(eval_examples))
         logger.info("  Batch size = %d", args.eval_batch_size)
 
-        student_model.eval()
-        result = do_eval(student_model, task_name, eval_dataloader,
+        teacher_model.eval()
+        result = do_eval(teacher_model, task_name, eval_dataloader,
                          device, output_mode, eval_labels, num_labels)
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(result[key]))
@@ -929,9 +922,9 @@ def main():
 
             eval_sampler = SequentialSampler(eval_data)
             eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
-                                            batch_size=args.eval_batch_size)
+                                         batch_size=args.eval_batch_size)
 
-            result = do_eval(student_model, task_name, eval_dataloader,
+            result = do_eval(teacher_model, task_name, eval_dataloader,
                              device, output_mode, eval_labels, num_labels)
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
@@ -941,12 +934,12 @@ def main():
         logger.info("  Batch size = %d", args.train_batch_size)
         logger.info("  Num steps = %d", num_train_optimization_steps)
         if n_gpu > 1:
-            student_model = torch.nn.DataParallel(student_model)
             teacher_model = torch.nn.DataParallel(teacher_model)
+        
         # Prepare optimizer
-        param_optimizer = list(student_model.named_parameters())
+        param_optimizer = list(teacher_model.named_parameters())
         size = 0
-        for n, p in student_model.named_parameters():
+        for n, p in teacher_model.named_parameters():
             logger.info('n: {}'.format(n))
             size += p.nelement()
 
@@ -957,20 +950,14 @@ def main():
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
         schedule = 'warmup_linear'
-        if not args.pred_distill:
-            schedule = 'none'
         optimizer = BertAdam(optimizer_grouped_parameters,
                              schedule=schedule,
                              lr=args.learning_rate,
                              warmup=args.warmup_proportion,
                              t_total=num_train_optimization_steps)
         # Prepare loss functions
+        loss_nll = CrossEntropyLoss()
         loss_mse = MSELoss()
-
-        def soft_cross_entropy(predicts, targets):
-            student_likelihood = F.log_softmax(predicts, dim=-1)
-            targets_prob = F.softmax(targets, dim=-1)
-            return (- targets_prob * student_likelihood).mean()
 
         # Train and evaluate
         global_step = 0
@@ -979,11 +966,10 @@ def main():
 
         for epoch_ in trange(int(args.num_train_epochs), desc="Epoch"):
             tr_loss = 0.
-            tr_att_loss = 0.
-            tr_rep_loss = 0.
             tr_cls_loss = 0.
+            tr_acc = 0.
 
-            student_model.train()
+            teacher_model.train()
             nb_tr_examples, nb_tr_steps = 0, 0
 
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration", ascii=True)):
@@ -993,75 +979,20 @@ def main():
                 if input_ids.size()[0] != args.train_batch_size:
                     continue
 
-                att_loss = 0.
-                rep_loss = 0.
                 cls_loss = 0.
 
-                # teacher_logits, student_logits: [batch_size, label_num]
-                # student_pooled, teacher_pooled: [batch_size, hidden_size]
-                student_logits, student_atts, student_reps, student_pooled = student_model(input_ids, segment_ids, input_mask,
-                                                                                           is_student=True)
+                # logits: [batch_size, label_num]
+                # pooled: [batch_size, hidden_size]
+                logits, atts, reps, pooled = teacher_model(input_ids, segment_ids, input_mask)
 
-                with torch.no_grad():
-                    teacher_logits, teacher_atts, teacher_reps, teacher_pooled = teacher_model(input_ids, segment_ids, input_mask)
+                if output_mode == "classification":
+                    assert logits.dim() == 2
+                    cls_loss = loss_nll(logits, label_ids.view(-1))
+                elif output_mode == "regression":
+                    cls_loss = loss_mse(logits.view(-1), label_ids.view(-1))
 
-                if args.pred_distill:
-                    if output_mode == "classification":
-                        cls_loss = soft_cross_entropy(student_logits / args.temperature,
-                                                      teacher_logits / args.temperature)
-                    elif output_mode == "regression":
-                        loss_mse = MSELoss()
-                        cls_loss = loss_mse(student_logits.view(-1), label_ids.view(-1))
-
-                    loss = cls_loss
-                    tr_cls_loss += cls_loss.item()
-
-                elif args.similarity_distill:
-                    sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(train_data, args.sample_n_example)
-
-                    with torch.no_grad():
-                        _, _, _, sampled_pooled = teacher_model(sampled_ids, sampled_seg, sampled_mask)
-
-                    # sampled_pooled: [n_examples, hidden_size]
-                    # teacher_pooled: [batch_size, hidden_size]
-                    sampled_pooled = F.normalize(sampled_pooled, p=2, dim=1).detach()
-                    teacher_pooled = F.normalize(teacher_pooled, p=2, dim=1).detach()
-                    student_pooled = F.normalize(student_pooled, p=2, dim=1)
-
-                    tt_product = torch.matmul(teacher_pooled, sampled_pooled.T)
-                    st_product = torch.matmul(student_pooled, sampled_pooled.T)
-
-                    sim_loss = soft_cross_entropy(st_product, tt_product)
-                    
-                    loss = sim_loss
-                    tr_cls_loss += sim_loss.item()
-
-                else:
-                    teacher_layer_num = len(teacher_atts)
-                    student_layer_num = len(student_atts)
-                    assert teacher_layer_num % student_layer_num == 0
-                    layers_per_block = int(teacher_layer_num / student_layer_num)
-                    new_teacher_atts = [teacher_atts[i * layers_per_block + layers_per_block - 1]
-                                        for i in range(student_layer_num)]
-
-                    for student_att, teacher_att in zip(student_atts, new_teacher_atts):
-                        student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to(device),
-                                                  student_att)
-                        teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to(device),
-                                                  teacher_att)
-
-                        tmp_loss = loss_mse(student_att, teacher_att)
-                        att_loss += tmp_loss
-
-                    new_teacher_reps = [teacher_reps[i * layers_per_block] for i in range(student_layer_num + 1)]
-                    new_student_reps = student_reps
-                    for student_rep, teacher_rep in zip(new_student_reps, new_teacher_reps):
-                        tmp_loss = loss_mse(student_rep, teacher_rep)
-                        rep_loss += tmp_loss
-
-                    loss = rep_loss + att_loss
-                    tr_att_loss += att_loss.item()
-                    tr_rep_loss += rep_loss.item()
+                loss = cls_loss
+                tr_cls_loss += cls_loss.item()
 
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
@@ -1079,58 +1010,52 @@ def main():
                     optimizer.zero_grad()
                     global_step += 1
 
+                # log acc
+                preds = np.argmax(logits.detach().cpu().numpy(), axis=1)
+                tr_results = compute_metrics(task_name, preds, label_ids.cpu().numpy())
+                tr_acc += tr_results['acc']
+                # logger.info("- train acc: {}".format(tr_results['acc']))
+                
                 if (global_step + 1) % args.eval_step == 0:
                     logger.info("***** Running evaluation *****")
                     logger.info("  Epoch = {} iter {} step".format(epoch_, global_step))
                     logger.info("  Num examples = %d", len(eval_examples))
                     logger.info("  Batch size = %d", args.eval_batch_size)
 
-                    student_model.eval()
-
-                    loss = tr_loss / (step + 1)
-                    cls_loss = tr_cls_loss / (step + 1)
-                    att_loss = tr_att_loss / (step + 1)
-                    rep_loss = tr_rep_loss / (step + 1)
+                    teacher_model.eval()
 
                     result = {}
-                    if args.pred_distill or args.similarity_distill:
-                        result = do_eval(student_model, task_name, eval_dataloader,
-                                         device, output_mode, eval_labels, num_labels)
+                    result = do_eval(teacher_model, task_name, eval_dataloader,
+                                     device, output_mode, eval_labels, num_labels)
                     result['global_step'] = global_step
-                    result['cls_loss'] = cls_loss
-                    result['att_loss'] = att_loss
-                    result['rep_loss'] = rep_loss
-                    result['loss'] = loss
+                    result['cls_loss'] = tr_cls_loss / (step + 1)
+                    result['loss'] = tr_loss / (step + 1)
+                    result['train_acc'] = tr_acc / (step + 1)
 
                     result_to_file(result, output_eval_file)
 
-                    if not args.pred_distill:
+                    # save model
+                    save_model = False
+
+                    if task_name in acc_tasks and result['acc'] > best_dev_acc:
+                        best_dev_acc = result['acc']
                         save_model = True
-                    elif args.similarity_distill:
+
+                    if task_name in corr_tasks and result['corr'] > best_dev_acc:
+                        best_dev_acc = result['corr']
                         save_model = True
-                    else:
-                        save_model = False
 
-                        if task_name in acc_tasks and result['acc'] > best_dev_acc:
-                            best_dev_acc = result['acc']
-                            save_model = True
-
-                        if task_name in corr_tasks and result['corr'] > best_dev_acc:
-                            best_dev_acc = result['corr']
-                            save_model = True
-
-                        if task_name in mcc_tasks and result['mcc'] > best_dev_acc:
-                            best_dev_acc = result['mcc']
-                            save_model = True
+                    if task_name in mcc_tasks and result['mcc'] > best_dev_acc:
+                        best_dev_acc = result['mcc']
+                        save_model = True
 
                     if save_model:
                         logger.info("***** Save model *****")
 
-                        model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
+                        model_to_save = teacher_model.module if hasattr(teacher_model, 'module') else teacher_model
 
                         model_name = WEIGHTS_NAME
-                        # if not args.pred_distill:
-                        #     model_name = "step_{}_{}".format(global_step, WEIGHTS_NAME)
+
                         output_model_file = os.path.join(args.output_dir, model_name)
                         output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
 
@@ -1138,44 +1063,7 @@ def main():
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(args.output_dir)
 
-                        # Test mnli-mm
-                        # if args.pred_distill and task_name == "mnli":
-                        #     task_name = "mnli-mm"
-                        #     processor = processors[task_name]()
-                        #     if not os.path.exists(args.output_dir + '-MM'):
-                        #         os.makedirs(args.output_dir + '-MM')
-
-                        #     eval_examples = processor.get_dev_examples(args.data_dir)
-
-                        #     eval_features = convert_examples_to_features(
-                        #         eval_examples, label_list, args.max_seq_length, tokenizer, output_mode, cluster_map)
-                        #     eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
-
-                        #     logger.info("***** Running mm evaluation *****")
-                        #     logger.info("  Num examples = %d", len(eval_examples))
-                        #     logger.info("  Batch size = %d", args.eval_batch_size)
-
-                        #     eval_sampler = SequentialSampler(eval_data)
-                        #     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
-                        #                                  batch_size=args.eval_batch_size)
-
-                        #     result = do_eval(student_model, task_name, eval_dataloader,
-                        #                      device, output_mode, eval_labels, num_labels)
-
-                        #     result['global_step'] = global_step
-
-                        #     tmp_output_eval_file = os.path.join(args.output_dir + '-MM', "eval_results.txt")
-                        #     result_to_file(result, tmp_output_eval_file)
-
-                        #     task_name = 'mnli'
-
-                        # if oncloud:
-                        #     logging.info(mox.file.list_directory(args.output_dir, recursive=True))
-                        #     logging.info(mox.file.list_directory('.', recursive=True))
-                        #     mox.file.copy_parallel(args.output_dir, args.data_url)
-                        #     mox.file.copy_parallel('.', args.data_url)
-
-                    student_model.train()
+                    teacher_model.train()
 
 
 if __name__ == "__main__":
