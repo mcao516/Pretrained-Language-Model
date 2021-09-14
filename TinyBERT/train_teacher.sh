@@ -2,7 +2,7 @@
 source ~/env37/bin/activate
 
 TASK_NAME=MNLI
-CLUSTER_NUM=32
+CLUSTER_NUM=2
 BERT_BASE_DIR=/home/mcao610/scratch/huggingface/bert-base-uncased
 TASK_DIR=/home/mcao610/scratch/glue_data/${TASK_NAME}
 OUTPUT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/teacher-cluster-${CLUSTER_NUM} # output directory
@@ -20,4 +20,4 @@ CUDA_VISIBLE_DEVICE=0,1,2,3 python /home/mcao610/Pretrained-Language-Model/TinyB
                             --max_seq_length 128 \
                             --train_batch_size 32 \
                             --aug_train \
-                            --k ${CLUSTER_NUM}; # --aug_train \
+                            --k ${CLUSTER_NUM};
