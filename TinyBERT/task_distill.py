@@ -856,7 +856,7 @@ def main():
         raise ValueError("Task not found: %s" % task_name)
 
     # load cluster map
-    cluster_map_path = 'clusters/cluster_mnli_k{}.json'.format(args.k)
+    cluster_map_path = '/home/mcao610/Pretrained-Language-Model/TinyBERT/clusters/cluster_mnli_k{}.json'.format(args.k)
     cluster_map = None
     with open(cluster_map_path) as f:
         cluster_map = json.load(f)
