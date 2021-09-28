@@ -2,7 +2,7 @@
 source ~/env37/bin/activate
 
 TASK_NAME=MNLI
-CLUSTER_NUM=8
+CLUSTER_NUM=256
 FT_BERT_BASE_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/teacher-cluster-${CLUSTER_NUM}
 GENERAL_TINYBERT_DIR=/home/mcao610/scratch/General_TinyBERT_6L_768D
 TASK_DIR=/home/mcao610/scratch/glue_data/${TASK_NAME}
