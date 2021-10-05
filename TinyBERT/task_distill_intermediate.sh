@@ -6,7 +6,7 @@ CLUSTER_NUM=256
 FT_BERT_BASE_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/teacher-cluster-${CLUSTER_NUM}
 GENERAL_TINYBERT_DIR=/home/mcao610/scratch/General_TinyBERT_6L_768D
 TASK_DIR=/home/mcao610/scratch/glue_data/${TASK_NAME}
-TMP_TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/intermediate-cluster-${CLUSTER_NUM}
+TMP_TINYBERT_DIR=/home/mcao610/scratch/TinyBERT_TEST/${TASK_NAME}/intermediate-cluster-${CLUSTER_NUM}-scratch
 
 mkdir $TMP_TINYBERT_DIR
 python /home/mcao610/Pretrained-Language-Model/TinyBERT/task_distill.py \
@@ -21,4 +21,5 @@ python /home/mcao610/Pretrained-Language-Model/TinyBERT/task_distill.py \
                                     --eval_step 3000 \
                                     --aug_train \
                                     --do_lower_case \
-                                    --k ${CLUSTER_NUM};
+                                    --k ${CLUSTER_NUM} \
+                                    --init_teacher_from_scratch;

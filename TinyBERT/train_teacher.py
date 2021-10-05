@@ -967,7 +967,7 @@ def main():
         for epoch_ in trange(int(args.num_train_epochs), desc="Epoch"):
             tr_loss = 0.
             tr_cls_loss = 0.
-            tr_acc = 0.
+            tr_acc = []
 
             teacher_model.train()
             nb_tr_examples, nb_tr_steps = 0, 0
@@ -1013,7 +1013,7 @@ def main():
                 # log acc
                 preds = np.argmax(logits.detach().cpu().numpy(), axis=1)
                 tr_results = compute_metrics(task_name, preds, label_ids.cpu().numpy())
-                tr_acc += tr_results['acc']
+                tr_acc.append(tr_results['acc'])
                 # logger.info("- train acc: {}".format(tr_results['acc']))
                 
                 if (global_step + 1) % args.eval_step == 0:
@@ -1030,7 +1030,8 @@ def main():
                     result['global_step'] = global_step
                     result['cls_loss'] = tr_cls_loss / (step + 1)
                     result['loss'] = tr_loss / (step + 1)
-                    result['train_acc'] = tr_acc / (step + 1)
+                    result['train_acc'] = sum(tr_acc) / len(tr_acc)
+                    tr_acc = []
 
                     result_to_file(result, output_eval_file)
 
