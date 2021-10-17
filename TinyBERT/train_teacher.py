@@ -769,6 +769,8 @@ def main():
     parser.add_argument('--temperature',
                         type=float,
                         default=1.)
+    parser.add_argument('--init_from_scratch',
+                        action='store_true')
 
     args = parser.parse_args()
     logger.info('The args: {}'.format(args))
@@ -894,7 +896,11 @@ def main():
     eval_sampler = SequentialSampler(eval_data)
     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
-    teacher_model = TinyBertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
+    if args.init_from_scratch:
+        logger.info("[WARNING] Teacher model is initialized from scratch!")
+        teacher_model = TinyBertForSequenceClassification.from_scratch(args.teacher_model, num_labels=num_labels)
+    else:
+        teacher_model = TinyBertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
     teacher_model.to(device)
 
     if args.do_eval:
