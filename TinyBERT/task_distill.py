@@ -863,7 +863,7 @@ def main():
     # load cluster map
     cluster_map = None
     if args.cluster_map_path is not None:
-        with open(cluster_map_path) as f:
+        with open(args.cluster_map_path) as f:
             cluster_map = json.load(f)
             logger.info("cluster map loaded from: {}".format(cluster_map_path))
 
