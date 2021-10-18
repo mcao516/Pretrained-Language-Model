@@ -859,7 +859,7 @@ def main():
     if args.cluster_map_path is not None:
         with open(args.cluster_map_path) as f:
             cluster_map = json.load(f)
-            logger.info("cluster map loaded from: {}".format(cluster_map_path))
+            logger.info("cluster map loaded from: {}".format(args.cluster_map_path))
     
     processor = processors[task_name]()
     output_mode = output_modes[task_name]
