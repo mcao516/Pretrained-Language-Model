@@ -771,6 +771,9 @@ def main():
                         default=1.)
     parser.add_argument('--init_from_scratch',
                         action='store_true')
+    parser.add_argument('--cluster_map_path',
+                        type=str,
+                        default=None)
 
     args = parser.parse_args()
     logger.info('The args: {}'.format(args))
@@ -852,12 +855,11 @@ def main():
         raise ValueError("Task not found: %s" % task_name)
 
     # load cluster map
-    cluster_map_path = 'clusters/cluster_mnli_k{}.json'.format(args.k)
-
     cluster_map = None
-    with open(cluster_map_path) as f:
-        cluster_map = json.load(f)
-        logger.info("cluster map loaded from: {}".format(cluster_map_path))
+    if args.cluster_map_path is not None:
+        with open(cluster_map_path) as f:
+            cluster_map = json.load(f)
+            logger.info("cluster map loaded from: {}".format(cluster_map_path))
     
     processor = processors[task_name]()
     output_mode = output_modes[task_name]

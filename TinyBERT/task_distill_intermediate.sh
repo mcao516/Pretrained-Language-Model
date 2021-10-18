@@ -22,4 +22,5 @@ python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
     --aug_train \
     --do_lower_case \
     --k ${CLUSTER_NUM} \
-    --init_student_from_scratch;
+    --init_student_from_scratch \
+    --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_mnli_k${CLUSTER_NUM}.json;

@@ -23,4 +23,5 @@ python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
     --eval_step 1000 \
     --max_seq_length 128 \
     --train_batch_size 64 \
-    --k ${CLUSTER_NUM};
+    --k ${CLUSTER_NUM} \
+    --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_mnli_k${CLUSTER_NUM}.json;
