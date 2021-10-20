@@ -724,6 +724,14 @@ class BertPreTrainedModel(nn.Module):
         if metadata is not None:
             state_dict._metadata = metadata
 
+        if state_dict['classifier.weight'].shape[0] != kwargs.get('num_labels', None):
+            logger.info('Detect shape mismatch:')
+            logger.info('- classifier.weight: {}'.format(state_dict['classifier.weight'].shape))
+            logger.info('- num_labels: {}'.format(kwargs.get('num_labels', None)))
+            
+            state_dict.pop('classifier.weight')
+            state_dict.pop('classifier.bias')
+
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(
                 prefix[:-1], {})
