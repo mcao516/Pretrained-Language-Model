@@ -495,11 +495,10 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
         assert len(segment_ids) == max_seq_length
 
         if output_mode == "classification":
-            # if cluster_map is not None:
-            #     label_id = cluster_map[example.guid]
-            # else:
-            #     label_id = label_map[example.label]
-            label_id = cluster_map[example.guid]
+            if cluster_map is not None:
+                label_id = cluster_map[example.guid]
+            else:
+                label_id = label_map[example.label]
         elif output_mode == "regression":
             label_id = float(example.label)
         else:
