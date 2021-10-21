@@ -544,7 +544,10 @@ def simple_accuracy(preds, labels):
 
 def acc_and_f1(preds, labels):
     acc = simple_accuracy(preds, labels)
-    f1 = f1_score(y_true=labels, y_pred=preds)
+    if len(set(preds)) == 2 and len(set(labels)) == 2:
+        f1 = f1_score(y_true=labels, y_pred=preds)
+    else:
+        f1 = f1_score(y_true=labels, y_pred=preds, average='macro')
     return {
         "acc": acc,
         "f1": f1,
