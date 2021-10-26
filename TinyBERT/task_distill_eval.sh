@@ -1,8 +1,8 @@
 #!/bin/bash
 source ~/env37/bin/activate
 
-TASK_NAME=MNLI
-TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/final-similarity-10
+TASK_NAME=MRPC
+TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher
 TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
 OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/eval  # output directory
 
@@ -14,5 +14,5 @@ python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
     --task_name ${TASK_NAME} \
     --output_dir ${OUTPUT_DIR} \
     --do_lower_case \
-    --eval_batch_size 32 \
+    --eval_batch_size 64 \
     --max_seq_length 128;
