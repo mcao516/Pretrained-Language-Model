@@ -135,9 +135,8 @@ class MrpcProcessor(DataProcessor):
             self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
     def get_aug_examples(self, data_dir):
-        print('test')
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
+            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "train")
 
     def get_labels(self):
         """See base class."""
@@ -220,7 +219,7 @@ class ColaProcessor(DataProcessor):
 
     def get_aug_examples(self, data_dir):
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "train")
+            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
 
     def get_labels(self):
         """See base class."""
@@ -1023,7 +1022,10 @@ def main():
                 # log acc
                 preds = np.argmax(logits.detach().cpu().numpy(), axis=1)
                 tr_results = compute_metrics(task_name, preds, label_ids.cpu().numpy())
-                tr_acc.append(tr_results['acc'])
+                if task_name in acc_tasks:
+                    tr_acc.append(tr_results['acc'])
+                elif task_name in mcc_tasks:
+                    tr_acc.append(tr_results['mcc'])
                 # logger.info("- train acc: {}".format(tr_results['acc']))
                 
                 if (global_step + 1) % args.eval_step == 0:
@@ -1040,7 +1042,12 @@ def main():
                     result['global_step'] = global_step
                     result['cls_loss'] = tr_cls_loss / (step + 1)
                     result['loss'] = tr_loss / (step + 1)
-                    result['train_acc'] = sum(tr_acc) / len(tr_acc)
+                    if task_name in acc_tasks:
+                        result['train_acc'] = sum(tr_acc) / len(tr_acc)
+                    elif task_name in mcc_tasks:
+                        result['train_mcc'] = sum(tr_acc) / len(tr_acc)
+                    else:
+                        raise Exception('Unknown Evaluation Type!')
                     tr_acc = []
 
                     result_to_file(result, output_eval_file)
