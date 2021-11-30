@@ -1,8 +1,8 @@
 #!/bin/bash
 source ~/env37/bin/activate
 
-TASK_NAME=MRPC
-TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher
+TASK_NAME=SST-2
+TINYBERT_DIR=$SCRATCH/6L_768D_FinalModel/SST-2
 TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
 OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/eval  # output directory
 
