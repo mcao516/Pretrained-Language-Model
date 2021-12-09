@@ -4,19 +4,18 @@ source ~/env37/bin/activate
 TASK_NAME=MRPC
 PREDICTION_EVAL_STEP=10
 INTERMEDIATE_EVAL_STEP=50
-STUDENT_SIZE=6L
-STUDENT_MODEL=2nd_General_TinyBERT_6L_768D  # General_TinyBERT_4L_312D
+STUDENT_SIZE=6L-lr2e5
+STUDENT_MODEL=2nd_General_TinyBERT_6L_768D  # 2nd_General_TinyBERT_4L_312D
 
 
-for CLUSTER_NUM in 3 4 8 16 32 64
+for CLUSTER_NUM in 128
 do
     echo "- CLUSTER: ${CLUSTER_NUM}"
     CLASS_NUM=2
     # 1. train teacher
     BERT_BASE_DIR=$SCRATCH/huggingface/bert-base-uncased
     TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
-    OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
-
+    OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM} 
     mkdir $OUTPUT_DIR
         # --aug_train \
     python $HOME/Pretrained-Language-Model/TinyBERT/train_teacher.py \
@@ -74,7 +73,7 @@ do
         --task_name ${TASK_NAME} \
         --output_dir ${TINYBERT_DIR} \
         --do_lower_case \
-        --learning_rate 3e-5 \
+        --learning_rate 2e-5 \
         --num_train_epochs 3 \
         --eval_step ${PREDICTION_EVAL_STEP} \
         --max_seq_length 128 \
@@ -123,7 +122,7 @@ do
         --task_name ${TASK_NAME} \
         --output_dir ${TINYBERT_DIR} \
         --do_lower_case \
-        --learning_rate 3e-5 \
+        --learning_rate 2e-5 \
         --num_train_epochs 3 \
         --eval_step ${PREDICTION_EVAL_STEP} \
         --max_seq_length 128 \

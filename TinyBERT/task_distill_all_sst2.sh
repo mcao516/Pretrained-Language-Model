@@ -1,7 +1,7 @@
 #!/bin/bash
 source ~/env37/bin/activate
 
-TASK_NAME=QNLI
+TASK_NAME=SST-2
 PREDICTION_EVAL_STEP=300
 INTERMEDIATE_EVAL_STEP=1000
 STUDENT_SIZE=6L
@@ -13,25 +13,25 @@ do
     echo "- CLUSTER: ${CLUSTER_NUM}"
     CLASS_NUM=2
     # 1. train teacher
-    # BERT_BASE_DIR=$SCRATCH/huggingface/bert-base-uncased
-    # TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
-    # OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
+    BERT_BASE_DIR=$SCRATCH/huggingface/bert-base-uncased
+    TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
+    OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
 
-    # mkdir $OUTPUT_DIR
-    #     # --aug_train \
-    # python $HOME/Pretrained-Language-Model/TinyBERT/train_teacher.py \
-    #     --teacher_model ${BERT_BASE_DIR} \
-    #     --data_dir ${TASK_DIR} \
-    #     --task_name ${TASK_NAME} \
-    #     --output_dir ${OUTPUT_DIR} \
-    #     --do_lower_case \
-    #     --learning_rate 2e-5 \
-    #     --num_train_epochs 10 \
-    #     --eval_step ${PREDICTION_EVAL_STEP} \
-    #     --max_seq_length 128 \
-    #     --train_batch_size 32 \
-    #     --k ${CLUSTER_NUM} \
-    #     --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_qnli_k${CLUSTER_NUM}.json;
+    mkdir $OUTPUT_DIR
+        # --aug_train \
+    python $HOME/Pretrained-Language-Model/TinyBERT/train_teacher.py \
+        --teacher_model ${BERT_BASE_DIR} \
+        --data_dir ${TASK_DIR} \
+        --task_name ${TASK_NAME} \
+        --output_dir ${OUTPUT_DIR} \
+        --do_lower_case \
+        --learning_rate 2e-5 \
+        --num_train_epochs 10 \
+        --eval_step ${PREDICTION_EVAL_STEP} \
+        --max_seq_length 128 \
+        --train_batch_size 32 \
+        --k ${CLUSTER_NUM} \
+        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLUSTER_NUM}.json;
 
     # 2. intermediate distillation
     echo "[=== Intermediate Distillation (cluster: ${CLUSTER_NUM}) ===]"
@@ -55,7 +55,7 @@ do
         --eval_step ${INTERMEDIATE_EVAL_STEP} \
         --do_lower_case \
         --k ${CLUSTER_NUM} \
-        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_qnli_k${CLUSTER_NUM}.json;
+        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLUSTER_NUM}.json;
     
     # 3. final layer distillation
     echo "[=== Prediction Layer Distillation (cluster: ${CLUSTER_NUM}) ===]"
@@ -80,7 +80,7 @@ do
         --max_seq_length 128 \
         --train_batch_size 32 \
         --k ${CLUSTER_NUM} \
-        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_qnli_k${CLUSTER_NUM}.json;
+        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLUSTER_NUM}.json;
 
 
     # 4. intermediate layer distillation (pretrained on cluster data)
@@ -104,7 +104,7 @@ do
         --eval_step ${INTERMEDIATE_EVAL_STEP} \
         --do_lower_case \
         --k ${CLASS_NUM} \
-        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_qnli_k${CLASS_NUM}.json;
+        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLASS_NUM}.json;
     
     # 5. final layer distillation (pretrained on cluster data)
     echo "[=== Final Layer Distillation (pretrained on cluster: ${CLUSTER_NUM}) ===]"
@@ -129,6 +129,6 @@ do
         --max_seq_length 128 \
         --train_batch_size 32 \
         --k ${CLASS_NUM} \
-        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_qnli_k${CLASS_NUM}.json;
+        --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLASS_NUM}.json;
 
 done

@@ -34,7 +34,7 @@ import torch.nn.functional as F
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from tqdm import tqdm, trange
-
+from copy import deepcopy
 from torch.nn import CrossEntropyLoss, MSELoss
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
@@ -782,7 +782,9 @@ def main():
                         action='store_true')
     parser.add_argument('--cluster_map_path',
                         type=str,
-                        default=None)                    
+                        default=None)           
+    parser.add_argument('--initialize_student_embedding',
+                        action='store_true')
 
     args = parser.parse_args()
     logger.info('The args: {}'.format(args))
@@ -914,6 +916,11 @@ def main():
         student_model = TinyBertForSequenceClassification.from_scratch(args.student_model, num_labels=num_labels)
     else:
         student_model = TinyBertForSequenceClassification.from_pretrained(args.student_model, num_labels=num_labels)
+
+    if args.initialize_student_embedding:
+        logger.info("Initialize student embeding from teacher")
+        student_model.bert.embeddings = deepcopy(teacher_model.bert.embeddings)
+
     student_model.to(device)
 
     if args.do_eval:
