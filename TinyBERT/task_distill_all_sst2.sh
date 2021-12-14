@@ -4,8 +4,9 @@ source ~/env37/bin/activate
 TASK_NAME=SST-2
 PREDICTION_EVAL_STEP=300
 INTERMEDIATE_EVAL_STEP=1000
-STUDENT_SIZE=6L
-STUDENT_MODEL=2nd_General_TinyBERT_6L_768D  # General_TinyBERT_4L_312D
+STUDENT_SIZE=4L-simcse-scratch
+STUDENT_MODEL=General_TinyBERT_4L_312D  # General_TinyBERT_4L_312D
+TEACHER_TYPE=unsup-simcse-bert-base-uncased
 
 
 for CLUSTER_NUM in 2 3 4 8 16 32 64
@@ -13,9 +14,9 @@ do
     echo "- CLUSTER: ${CLUSTER_NUM}"
     CLASS_NUM=2
     # 1. train teacher
-    BERT_BASE_DIR=$SCRATCH/huggingface/bert-base-uncased
+    BERT_BASE_DIR=$SCRATCH/huggingface/unsup-simcse-bert-base-uncased
     TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
-    OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
+    OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
 
     mkdir $OUTPUT_DIR
         # --aug_train \
@@ -35,15 +36,16 @@ do
 
     # 2. intermediate distillation
     echo "[=== Intermediate Distillation (cluster: ${CLUSTER_NUM}) ===]"
-    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
+    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
     GENERAL_TINYBERT_DIR=$SCRATCH/${STUDENT_MODEL}
     TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
     TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/intermediate-${CLUSTER_NUM}
     
     mkdir $TMP_TINYBERT_DIR
         # --aug_train \
-        # --init_student_from_scratch \
+        # 
     python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
+        --init_student_from_scratch \ 
         --teacher_model ${FT_BERT_BASE_DIR} \
         --student_model ${GENERAL_TINYBERT_DIR} \
         --data_dir ${TASK_DIR} \
@@ -59,7 +61,7 @@ do
     
     # 3. final layer distillation
     echo "[=== Prediction Layer Distillation (cluster: ${CLUSTER_NUM}) ===]"
-    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
+    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
     TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/intermediate-${CLUSTER_NUM}
     TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
     TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/final-${CLUSTER_NUM}
@@ -85,7 +87,7 @@ do
 
     # 4. intermediate layer distillation (pretrained on cluster data)
     echo "[=== Intermediate Layer Distillation (pretrained on cluster: ${CLUSTER_NUM}) ===]"
-    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLASS_NUM}
+    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
     GENERAL_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/final-${CLUSTER_NUM}
     TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
     TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/intermediate-${CLASS_NUM}-seq${CLUSTER_NUM}
@@ -108,7 +110,7 @@ do
     
     # 5. final layer distillation (pretrained on cluster data)
     echo "[=== Final Layer Distillation (pretrained on cluster: ${CLUSTER_NUM}) ===]"
-    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLASS_NUM}
+    FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
     TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/intermediate-${CLASS_NUM}-seq${CLUSTER_NUM}
     TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
     TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/final-${CLASS_NUM}-seq${CLUSTER_NUM}
