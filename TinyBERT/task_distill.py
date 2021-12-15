@@ -991,6 +991,10 @@ def main():
             targets_prob = F.softmax(targets, dim=-1)
             return (- targets_prob * student_likelihood).mean()
 
+        def hinge_loss(predicts, targets, margin):
+            loss = F.mse_loss(predicts, targets, reduction='none') - margin
+            return F.relu(loss).mean()
+
         # Train and evaluate
         global_step = 0
         best_dev_acc = 0.0
@@ -1031,6 +1035,12 @@ def main():
                     elif output_mode == "regression":
                         loss_mse = MSELoss()
                         cls_loss = loss_mse(student_logits.view(-1), label_ids.view(-1))
+
+                    loss = cls_loss
+                    tr_cls_loss += cls_loss.item()
+                
+                elif args.presentation_distill:
+                    cls_loss = hinge_loss(student_pooled, teacher_pooled, args.margin)
 
                     loss = cls_loss
                     tr_cls_loss += cls_loss.item()
