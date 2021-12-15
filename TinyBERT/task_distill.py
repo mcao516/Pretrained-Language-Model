@@ -785,6 +785,11 @@ def main():
                         default=None)           
     parser.add_argument('--initialize_student_embedding',
                         action='store_true')
+    parser.add_argument('--presentation_distill',
+                        action='store_true')
+    parser.add_argument('--margin',
+                        type=float,
+                        default=0.01)
 
     args = parser.parse_args()
     logger.info('The args: {}'.format(args))
@@ -923,38 +928,39 @@ def main():
 
     student_model.to(device)
 
-    if args.do_eval:
-        logger.info("***** Running evaluation *****")
+    logger.info("***** Running evaluation before training *****")
+    logger.info("  Num examples = %d", len(eval_examples))
+    logger.info("  Batch size = %d", args.eval_batch_size)
+
+    student_model.eval()
+    result = do_eval(student_model, task_name, eval_dataloader,
+                        device, output_mode, eval_labels, num_labels)
+    for key in sorted(result.keys()):
+        logger.info("  %s = %s", key, str(result[key]))
+
+    if task_name == "mnli":
+        processor = processors["mnli-mm"]()
+
+        eval_examples = processor.get_dev_examples(args.data_dir)
+        eval_features = convert_examples_to_features(
+            eval_examples, label_list, args.max_seq_length, tokenizer, output_mode, cluster_map)
+        eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
+
+        logger.info("***** Running mm evaluation *****")
         logger.info("  Num examples = %d", len(eval_examples))
         logger.info("  Batch size = %d", args.eval_batch_size)
 
-        student_model.eval()
+        eval_sampler = SequentialSampler(eval_data)
+        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
+                                        batch_size=args.eval_batch_size)
+
         result = do_eval(student_model, task_name, eval_dataloader,
-                         device, output_mode, eval_labels, num_labels)
+                            device, output_mode, eval_labels, num_labels)
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(result[key]))
 
-        if task_name == "mnli":
-            processor = processors["mnli-mm"]()
 
-            eval_examples = processor.get_dev_examples(args.data_dir)
-            eval_features = convert_examples_to_features(
-                eval_examples, label_list, args.max_seq_length, tokenizer, output_mode, cluster_map)
-            eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
-
-            logger.info("***** Running mm evaluation *****")
-            logger.info("  Num examples = %d", len(eval_examples))
-            logger.info("  Batch size = %d", args.eval_batch_size)
-
-            eval_sampler = SequentialSampler(eval_data)
-            eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
-                                            batch_size=args.eval_batch_size)
-
-            result = do_eval(student_model, task_name, eval_dataloader,
-                             device, output_mode, eval_labels, num_labels)
-            for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(result[key]))
-    else:
+    if not args.do_eval:
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
         logger.info("  Batch size = %d", args.train_batch_size)
@@ -1038,9 +1044,9 @@ def main():
 
                     loss = cls_loss
                     tr_cls_loss += cls_loss.item()
-                
+
                 elif args.presentation_distill:
-                    cls_loss = hinge_loss(student_pooled, teacher_pooled, args.margin)
+                    cls_loss = hinge_loss(student_logits, teacher_logits, args.margin)
 
                     loss = cls_loss
                     tr_cls_loss += cls_loss.item()
@@ -1049,19 +1055,19 @@ def main():
                     sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(train_data, args.sample_n_example)
 
                     with torch.no_grad():
-                        _, _, _, sampled_pooled = teacher_model(sampled_ids, sampled_seg, sampled_mask)
+                        sampled_logits, _, _, sampled_pooled = teacher_model(sampled_ids, sampled_seg, sampled_mask)
 
                     # sampled_pooled: [n_examples, hidden_size]
                     # teacher_pooled: [batch_size, hidden_size]
-                    sampled_pooled = F.normalize(sampled_pooled, p=2, dim=1).detach()
-                    teacher_pooled = F.normalize(teacher_pooled, p=2, dim=1).detach()
-                    student_pooled = F.normalize(student_pooled, p=2, dim=1)
+                    sampled_logits = F.normalize(sampled_logits, p=2, dim=1).detach()
+                    teacher_logits = F.normalize(teacher_logits, p=2, dim=1).detach()
+                    student_logits = F.normalize(student_logits, p=2, dim=1)
 
-                    tt_product = torch.matmul(teacher_pooled, sampled_pooled.T)
-                    st_product = torch.matmul(student_pooled, sampled_pooled.T)
+                    tt_product = torch.matmul(teacher_logits, sampled_logits.T)
+                    st_product = torch.matmul(student_logits, sampled_logits.T)
 
                     sim_loss = soft_cross_entropy(st_product, tt_product)
-                    
+
                     loss = sim_loss
                     tr_cls_loss += sim_loss.item()
 
@@ -1122,7 +1128,7 @@ def main():
                     rep_loss = tr_rep_loss / (step + 1)
 
                     result = {}
-                    if args.pred_distill or args.similarity_distill:
+                    if args.pred_distill or args.similarity_distill or args.presentation_distill:
                         result = do_eval(student_model, task_name, eval_dataloader,
                                          device, output_mode, eval_labels, num_labels)
                     result['global_step'] = global_step
@@ -1133,11 +1139,7 @@ def main():
 
                     result_to_file(result, output_eval_file)
 
-                    if not args.pred_distill:
-                        save_model = True
-                    elif args.similarity_distill:
-                        save_model = True
-                    else:
+                    if args.pred_distill or args.presentation_distill or args.similarity_distill:
                         save_model = False
 
                         if task_name in acc_tasks and result['acc'] > best_dev_acc:
@@ -1151,6 +1153,8 @@ def main():
                         if task_name in mcc_tasks and result['mcc'] > best_dev_acc:
                             best_dev_acc = result['mcc']
                             save_model = True
+                    else:
+                        save_model = True
 
                     if save_model:
                         logger.info("***** Save model *****")
