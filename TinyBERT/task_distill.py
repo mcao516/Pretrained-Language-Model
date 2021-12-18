@@ -989,6 +989,7 @@ def main():
                              lr=args.learning_rate,
                              warmup=args.warmup_proportion,
                              t_total=num_train_optimization_steps)
+        
         # Prepare loss functions
         loss_mse = MSELoss()
 
@@ -999,7 +1000,28 @@ def main():
 
         def hinge_loss(predicts, targets, margin):
             loss = F.mse_loss(predicts, targets, reduction='none') - margin
-            return F.relu(loss).mean()
+            return F.relu(loss)
+
+        def seed_loss(teacher_logits, student_logits, queue_logits, temperature=1.0, lambda_a=1.0, lambda_c=1.0):
+            """
+            The loss function proposed in paper: https://arxiv.org/pdf/2101.04731.pdf
+            """
+            # sampled_logits: [n_examples, hidden_size]
+            # teacher_logits, student_logits: [batch_size, hidden_size]
+            queue_logits = torch.norm(queue_logits, p=2, dim=1).detach()
+            teacher_logits = torch.norm(teacher_logits, p=2, dim=1).detach()
+            student_logits = torch.norm(student_logits, p=2, dim=1)
+
+            tt_product = torch.matmul(teacher_logits, queue_logits.T) / temperature
+            st_product = torch.matmul(student_logits, queue_logits.T) / temperature
+
+            # alignment loss
+            align_loss = loss_mse(teacher_logits, student_logits)
+            # contrastive loss
+            contrast_loss = soft_cross_entropy(st_product, tt_product)
+
+            loss = (align_loss * lambda_a + contrast_loss * lambda_c) / 2
+            return loss
 
         # Train and evaluate
         global_step = 0
@@ -1053,25 +1075,17 @@ def main():
 
                 elif args.similarity_distill:
                     sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(train_data, args.sample_n_example)
-
                     with torch.no_grad():
                         sampled_logits, _, _, sampled_pooled = teacher_model(sampled_ids, sampled_seg, sampled_mask)
+                    
+                    loss = seed_loss(
+                        teacher_logits, student_logits, sampled_logits, temperature=1.0, lambda_a=1.0, lambda_c=1.0
+                    )
 
-                    # sampled_pooled: [n_examples, hidden_size]
-                    # teacher_pooled: [batch_size, hidden_size]
-                    sampled_logits = F.normalize(sampled_logits, p=2, dim=1).detach()
-                    teacher_logits = F.normalize(teacher_logits, p=2, dim=1).detach()
-                    student_logits = F.normalize(student_logits, p=2, dim=1)
-
-                    tt_product = torch.matmul(teacher_logits, sampled_logits.T)
-                    st_product = torch.matmul(student_logits, sampled_logits.T)
-
-                    sim_loss = soft_cross_entropy(st_product, tt_product)
-
-                    loss = sim_loss
-                    tr_cls_loss += sim_loss.item()
+                    tr_cls_loss += loss.item()
 
                 else:
+                    # intermediate layer distillation
                     teacher_layer_num = len(teacher_atts)
                     student_layer_num = len(student_atts)
                     assert teacher_layer_num % student_layer_num == 0
