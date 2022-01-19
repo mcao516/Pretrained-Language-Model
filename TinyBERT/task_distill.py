@@ -1000,7 +1000,7 @@ def main():
 
         def hinge_loss(predicts, targets, margin):
             loss = F.mse_loss(predicts, targets, reduction='none') - margin
-            return F.relu(loss)
+            return F.relu(loss).mean()
 
         def seed_loss(teacher_logits, student_logits, queue_logits, temperature=1.0, lambda_a=1.0, lambda_c=1.0):
             """

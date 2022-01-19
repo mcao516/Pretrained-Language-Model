@@ -6,38 +6,38 @@ TASK_NAME=MRPC
 PREDICTION_EVAL_STEP=20
 INTERMEDIATE_EVAL_STEP=50
 STUDENT_MODEL=General_TinyBERT_6L_768D
-TEACHER_TYPE=unsup-simcse-bert-base-uncased
+# TEACHER_TYPE=
 # General_TinyBERT_4L_312D, General_TinyBERT_6L_768D
 # 2nd_General_TinyBERT_4L_312D, 2nd_General_TinyBERT_6L_768D
 
 for SEED in 2
     do
-    STUDENT_SIZE=6L-seed${SEED}-simcse
+    STUDENT_SIZE=6L-seed${SEED}
 
-    for CLUSTER_NUM in 2 4 8
+    for CLUSTER_NUM in 8 16 32
     do
         echo "- CLUSTER: ${CLUSTER_NUM}"
         CLASS_NUM=2
 
         # 1. train teacher
-        BERT_BASE_DIR=$SCRATCH/huggingface/unsup-simcse-bert-base-uncased
-        TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
-        OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM} 
-        mkdir $OUTPUT_DIR
-            # --aug_train \
-        python $HOME/Pretrained-Language-Model/TinyBERT/train_teacher.py \
-            --teacher_model ${BERT_BASE_DIR} \
-            --data_dir ${TASK_DIR} \
-            --task_name ${TASK_NAME} \
-            --output_dir ${OUTPUT_DIR} \
-            --do_lower_case \
-            --learning_rate 2e-5 \
-            --num_train_epochs 10 \
-            --eval_step ${PREDICTION_EVAL_STEP} \
-            --max_seq_length 128 \
-            --train_batch_size 32 \
-            --k ${CLUSTER_NUM} \
-            --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_mrpc_k${CLUSTER_NUM}.json;
+        # BERT_BASE_DIR=$SCRATCH/huggingface/bert-base-uncased
+        # TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
+        # OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM} 
+        # mkdir $OUTPUT_DIR
+        #     # --aug_train \
+        # python $HOME/Pretrained-Language-Model/TinyBERT/train_teacher.py \
+        #     --teacher_model ${BERT_BASE_DIR} \
+        #     --data_dir ${TASK_DIR} \
+        #     --task_name ${TASK_NAME} \
+        #     --output_dir ${OUTPUT_DIR} \
+        #     --do_lower_case \
+        #     --learning_rate 2e-5 \
+        #     --num_train_epochs 10 \
+        #     --eval_step ${PREDICTION_EVAL_STEP} \
+        #     --max_seq_length 128 \
+        #     --train_batch_size 32 \
+        #     --k ${CLUSTER_NUM} \
+        #     --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_mrpc_k${CLUSTER_NUM}.json;
 
 
         # 2. intermediate distillation
@@ -95,7 +95,7 @@ for SEED in 2
 
         # 4. intermediate layer distillation (pretrained on cluster data)
         echo "[=== Intermediate Layer Distillation (pretrained on cluster: ${CLUSTER_NUM}) ===]"
-        FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
+        FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLASS_NUM}
         GENERAL_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/final-${CLUSTER_NUM}
         TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
         TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/intermediate-${CLASS_NUM}-seq${CLUSTER_NUM}
@@ -120,7 +120,7 @@ for SEED in 2
 
         # 5. final layer distillation (pretrained on cluster data)
         echo "[=== Final Layer Distillation (pretrained on cluster: ${CLUSTER_NUM}) ===]"
-        FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLUSTER_NUM}
+        FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${TEACHER_TYPE}/teacher-${CLASS_NUM}
         TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/intermediate-${CLASS_NUM}-seq${CLUSTER_NUM}
         TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
         TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/${STUDENT_SIZE}/final-${CLASS_NUM}-seq${CLUSTER_NUM}
