@@ -44,6 +44,8 @@ from transformer.tokenization import BertTokenizer
 from transformer.optimization import BertAdam
 from transformer.file_utils import WEIGHTS_NAME, CONFIG_NAME
 
+from utils import set_random_seed, load_cluster_map
+
 csv.field_size_limit(sys.maxsize)
 
 log_format = '%(asctime)s %(message)s'
@@ -675,6 +677,48 @@ def do_eval(model, task_name, eval_dataloader,
     return result
 
 
+def load_training_data(args, processor, tokenizer, output_mode, cluster_map):
+    if not args.aug_train:
+        train_examples = processor.get_train_examples(args.data_dir)
+    else:
+        train_examples = processor.get_aug_examples(args.data_dir)
+    
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
+            args.gradient_accumulation_steps))
+
+    args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
+
+    train_features = convert_examples_to_features(train_examples,
+                                                  processor.get_labels(),
+                                                  args.max_seq_length,
+                                                  tokenizer,
+                                                  output_mode,
+                                                  cluster_map)
+    train_data, _ = get_tensor_data(output_mode, train_features)
+    train_sampler = RandomSampler(train_data)
+    train_dataloader = DataLoader(train_data, 
+                                  sampler=train_sampler,
+                                  batch_size=args.train_batch_size)
+    return train_examples, train_data, train_dataloader
+
+
+def load_evaluation_data(args, processor, tokenizer, output_mode, cluster_map):
+    eval_examples = processor.get_dev_examples(args.data_dir)
+    eval_features = convert_examples_to_features(eval_examples,
+                                                 processor.get_labels(),
+                                                 args.max_seq_length,
+                                                 tokenizer,
+                                                 output_mode,
+                                                 cluster_map)
+    eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
+    eval_sampler = SequentialSampler(eval_data)
+    eval_dataloader = DataLoader(eval_data,
+                                 sampler=eval_sampler,
+                                 batch_size=args.eval_batch_size)
+    return eval_examples, eval_data, eval_labels, eval_dataloader
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir",
@@ -785,12 +829,7 @@ def main():
                         default=None)           
     parser.add_argument('--initialize_student_embedding',
                         action='store_true')
-    parser.add_argument('--presentation_distill',
-                        action='store_true')
-    parser.add_argument('--margin',
-                        type=float,
-                        default=0.01)
-
+    
     args = parser.parse_args()
     logger.info('The args: {}'.format(args))
 
@@ -846,11 +885,7 @@ def main():
     logger.info("device: {} n_gpu: {}".format(device, n_gpu))
 
     # Prepare seed
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
+    set_random_seed(args, n_gpu)
 
     # Prepare task settings
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir):
@@ -858,6 +893,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    # set up task parameters
     task_name = args.task_name.lower()
 
     if task_name in default_params:
@@ -871,11 +907,8 @@ def main():
         raise ValueError("Task not found: %s" % task_name)
 
     # load cluster map
-    cluster_map = None
-    if args.cluster_map_path is not None:
-        with open(args.cluster_map_path) as f:
-            cluster_map = json.load(f)
-            logger.info("cluster map loaded from: {}".format(args.cluster_map_path))
+    logger.info("cluster map loaded from: {}".format(args.cluster_map_path))
+    cluster_map = load_cluster_map(args)
 
     processor = processors[task_name]()
     output_mode = output_modes[task_name]
@@ -884,33 +917,13 @@ def main():
 
     tokenizer = BertTokenizer.from_pretrained(args.student_model, do_lower_case=args.do_lower_case)
 
+    # load training data & evaluation data
     if not args.do_eval:
-        if not args.aug_train:
-            train_examples = processor.get_train_examples(args.data_dir)
-        else:
-            train_examples = processor.get_aug_examples(args.data_dir)
-        
-        if args.gradient_accumulation_steps < 1:
-            raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
-                args.gradient_accumulation_steps))
+        train_examples, train_data, train_dataloader = load_training_data(
+            args, processor, tokenizer, output_mode, cluster_map)
 
-        args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
-
-        num_train_optimization_steps = int(
-            len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
-
-        train_features = convert_examples_to_features(train_examples, label_list,
-                                                      args.max_seq_length, tokenizer, output_mode, cluster_map)
-        train_data, _ = get_tensor_data(output_mode, train_features)
-        train_sampler = RandomSampler(train_data)
-        train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
-
-    eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features = convert_examples_to_features(eval_examples, label_list,
-                                                 args.max_seq_length, tokenizer, output_mode, cluster_map)
-    eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
-    eval_sampler = SequentialSampler(eval_data)
-    eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
+    eval_examples, eval_data, eval_labels, eval_dataloader = load_evaluation_data(
+        args, processor, tokenizer, output_mode, cluster_map)
 
     if not args.do_eval:
         teacher_model = TinyBertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
@@ -922,44 +935,39 @@ def main():
     else:
         student_model = TinyBertForSequenceClassification.from_pretrained(args.student_model, num_labels=num_labels)
 
-    if args.initialize_student_embedding:
-        logger.info("Initialize student embeding from teacher")
-        student_model.bert.embeddings = deepcopy(teacher_model.bert.embeddings)
+    # if args.initialize_student_embedding:
+    #     logger.info("Initialize student embeding from teacher")
+    #     student_model.bert.embeddings = deepcopy(teacher_model.bert.embeddings)
 
     student_model.to(device)
 
+    # evaluation
     logger.info("***** Running evaluation before training *****")
     logger.info("  Num examples = %d", len(eval_examples))
     logger.info("  Batch size = %d", args.eval_batch_size)
 
     student_model.eval()
     result = do_eval(student_model, task_name, eval_dataloader,
-                        device, output_mode, eval_labels, num_labels)
+                     device, output_mode, eval_labels, num_labels)
     for key in sorted(result.keys()):
         logger.info("  %s = %s", key, str(result[key]))
 
     if task_name == "mnli":
+        logger.info("***** Running evaluation on MNLI-MM *****")
+        
         processor = processors["mnli-mm"]()
-
-        eval_examples = processor.get_dev_examples(args.data_dir)
-        eval_features = convert_examples_to_features(
-            eval_examples, label_list, args.max_seq_length, tokenizer, output_mode, cluster_map)
-        eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
-
-        logger.info("***** Running mm evaluation *****")
-        logger.info("  Num examples = %d", len(eval_examples))
-        logger.info("  Batch size = %d", args.eval_batch_size)
-
-        eval_sampler = SequentialSampler(eval_data)
-        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
-                                        batch_size=args.eval_batch_size)
+        eval_data, eval_dataloader = load_evaluation_data(args, processor)
 
         result = do_eval(student_model, task_name, eval_dataloader,
-                            device, output_mode, eval_labels, num_labels)
+                         device, output_mode, eval_labels, num_labels)
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(result[key]))
 
-
+    # training
+    num_train_optimization_steps = int(
+        len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) \
+        * args.num_train_epochs
+    
     if not args.do_eval:
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
@@ -968,14 +976,15 @@ def main():
         if n_gpu > 1:
             student_model = torch.nn.DataParallel(student_model)
             teacher_model = torch.nn.DataParallel(teacher_model)
+          
         # Prepare optimizer
         param_optimizer = list(student_model.named_parameters())
-        size = 0
-        for n, p in student_model.named_parameters():
-            logger.info('n: {}'.format(n))
-            size += p.nelement()
+        # size = 0
+        # for n, p in student_model.named_parameters():
+        #     logger.info('n: {}'.format(n))
+        #     size += p.nelement()
 
-        logger.info('Total parameters: {}'.format(size))
+        # logger.info('Total parameters: {}'.format(size))
         no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
         optimizer_grouped_parameters = [
             {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
@@ -998,19 +1007,15 @@ def main():
             targets_prob = F.softmax(targets, dim=-1)
             return (- targets_prob * student_likelihood).mean()
 
-        def hinge_loss(predicts, targets, margin):
-            loss = F.mse_loss(predicts, targets, reduction='none') - margin
-            return F.relu(loss).mean()
-
         def seed_loss(teacher_logits, student_logits, queue_logits, temperature=1.0, lambda_a=1.0, lambda_c=1.0):
             """
             The loss function proposed in paper: https://arxiv.org/pdf/2101.04731.pdf
             """
             # sampled_logits: [n_examples, hidden_size]
             # teacher_logits, student_logits: [batch_size, hidden_size]
-            queue_logits = torch.norm(queue_logits, p=2, dim=1).detach()
-            teacher_logits = torch.norm(teacher_logits, p=2, dim=1).detach()
-            student_logits = torch.norm(student_logits, p=2, dim=1)
+            queue_logits = torch.norm(queue_logits, p=2, dim=1, keepdim=True).detach()
+            teacher_logits = torch.norm(teacher_logits, p=2, dim=1, keepdim=True).detach()
+            student_logits = torch.norm(student_logits, p=2, dim=1, keepdim=True)
 
             tt_product = torch.matmul(teacher_logits, queue_logits.T) / temperature
             st_product = torch.matmul(student_logits, queue_logits.T) / temperature
@@ -1029,14 +1034,11 @@ def main():
         output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
 
         for epoch_ in trange(int(args.num_train_epochs), desc="Epoch"):
-            tr_loss = 0.
-            tr_att_loss = 0.
-            tr_rep_loss = 0.
-            tr_cls_loss = 0.
-
             student_model.train()
+            teacher_model.eval()
+            
+            tr_loss = 0.
             nb_tr_examples, nb_tr_steps = 0, 0
-
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration", ascii=True)):
                 batch = tuple(t.to(device) for t in batch)
 
@@ -1044,17 +1046,16 @@ def main():
                 if input_ids.size()[0] != args.train_batch_size:
                     continue
 
-                att_loss = 0.
-                rep_loss = 0.
-                cls_loss = 0.
-
                 # teacher_logits, student_logits: [batch_size, label_num]
                 # student_pooled, teacher_pooled: [batch_size, hidden_size]
-                student_logits, student_atts, student_reps, student_pooled = student_model(input_ids, segment_ids, input_mask,
-                                                                                           is_student=True)
+                student_logits, student_atts, student_reps, _ = student_model(
+                    input_ids, segment_ids, input_mask, is_student=True
+                )
 
                 with torch.no_grad():
-                    teacher_logits, teacher_atts, teacher_reps, teacher_pooled = teacher_model(input_ids, segment_ids, input_mask)
+                    teacher_logits, teacher_atts, teacher_reps, _ = teacher_model(
+                        input_ids, segment_ids, input_mask
+                    )
 
                 if args.pred_distill:
                     if output_mode == "classification":
@@ -1065,27 +1066,27 @@ def main():
                         cls_loss = loss_mse(student_logits.view(-1), label_ids.view(-1))
 
                     loss = cls_loss
-                    tr_cls_loss += cls_loss.item()
-
-                elif args.presentation_distill:
-                    cls_loss = hinge_loss(student_logits, teacher_logits, args.margin)
-
-                    loss = cls_loss
-                    tr_cls_loss += cls_loss.item()
 
                 elif args.similarity_distill:
-                    sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(train_data, args.sample_n_example)
+                    sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(
+                        train_data, args.sample_n_example
+                    )
                     with torch.no_grad():
-                        sampled_logits, _, _, sampled_pooled = teacher_model(sampled_ids, sampled_seg, sampled_mask)
-                    
-                    loss = seed_loss(
-                        teacher_logits, student_logits, sampled_logits, temperature=1.0, lambda_a=1.0, lambda_c=1.0
+                        sampled_logits, _, _, sampled_pooled = teacher_model(
+                            sampled_ids, sampled_seg, sampled_mask
                     )
 
-                    tr_cls_loss += loss.item()
+                    loss = seed_loss(teacher_logits,
+                                     student_logits,
+                                     sampled_logits,
+                                     temperature=1.0,
+                                     lambda_a=1.0,
+                                     lambda_c=1.0)
 
                 else:
                     # intermediate layer distillation
+                    att_loss, rep_loss = 0.0, 0.0
+
                     teacher_layer_num = len(teacher_atts)
                     student_layer_num = len(student_atts)
                     assert teacher_layer_num % student_layer_num == 0
@@ -1109,8 +1110,6 @@ def main():
                         rep_loss += tmp_loss
 
                     loss = rep_loss + att_loss
-                    tr_att_loss += att_loss.item()
-                    tr_rep_loss += rep_loss.item()
 
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
@@ -1136,24 +1135,15 @@ def main():
 
                     student_model.eval()
 
-                    loss = tr_loss / (step + 1)
-                    cls_loss = tr_cls_loss / (step + 1)
-                    att_loss = tr_att_loss / (step + 1)
-                    rep_loss = tr_rep_loss / (step + 1)
-
                     result = {}
-                    if args.pred_distill or args.similarity_distill or args.presentation_distill:
+                    if args.pred_distill or args.similarity_distill:
                         result = do_eval(student_model, task_name, eval_dataloader,
                                          device, output_mode, eval_labels, num_labels)
                     result['global_step'] = global_step
-                    result['cls_loss'] = cls_loss
-                    result['att_loss'] = att_loss
-                    result['rep_loss'] = rep_loss
-                    result['loss'] = loss
-
+                    result['loss'] = tr_loss / (step + 1)
                     result_to_file(result, output_eval_file)
 
-                    if args.pred_distill or args.presentation_distill or args.similarity_distill:
+                    if args.pred_distill or args.similarity_distill:
                         save_model = False
 
                         if task_name in acc_tasks and result['acc'] > best_dev_acc:
@@ -1185,45 +1175,7 @@ def main():
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(args.output_dir)
 
-                        # Test mnli-mm
-                        # if args.pred_distill and task_name == "mnli":
-                        #     task_name = "mnli-mm"
-                        #     processor = processors[task_name]()
-                        #     if not os.path.exists(args.output_dir + '-MM'):
-                        #         os.makedirs(args.output_dir + '-MM')
-
-                        #     eval_examples = processor.get_dev_examples(args.data_dir)
-
-                        #     eval_features = convert_examples_to_features(
-                        #         eval_examples, label_list, args.max_seq_length, tokenizer, output_mode, cluster_map)
-                        #     eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
-
-                        #     logger.info("***** Running mm evaluation *****")
-                        #     logger.info("  Num examples = %d", len(eval_examples))
-                        #     logger.info("  Batch size = %d", args.eval_batch_size)
-
-                        #     eval_sampler = SequentialSampler(eval_data)
-                        #     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
-                        #                                  batch_size=args.eval_batch_size)
-
-                        #     result = do_eval(student_model, task_name, eval_dataloader,
-                        #                      device, output_mode, eval_labels, num_labels)
-
-                        #     result['global_step'] = global_step
-
-                        #     tmp_output_eval_file = os.path.join(args.output_dir + '-MM', "eval_results.txt")
-                        #     result_to_file(result, tmp_output_eval_file)
-
-                        #     task_name = 'mnli'
-
-                        # if oncloud:
-                        #     logging.info(mox.file.list_directory(args.output_dir, recursive=True))
-                        #     logging.info(mox.file.list_directory('.', recursive=True))
-                        #     mox.file.copy_parallel(args.output_dir, args.data_url)
-                        #     mox.file.copy_parallel('.', args.data_url)
-
                     student_model.train()
-
 
 if __name__ == "__main__":
     main()

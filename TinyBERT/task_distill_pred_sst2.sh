@@ -2,16 +2,17 @@
 source ~/env37/bin/activate
 
 TASK_NAME=SST-2
-CLUSTER_NUM=32
+CLUSTER_NUM=2
 FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
-TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/intermediate-${CLUSTER_NUM}-seq16_8_4
+TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/intermediate-${CLUSTER_NUM}-test
 TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
-TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/final-${CLUSTER_NUM}-seq16_8_4
+TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/final-${CLUSTER_NUM}-test-sim
 
 mkdir $TINYBERT_DIR
 #   --aug_train \
 python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
-    --pred_distill \
+    --similarity_distill \
+    --sample_n_example 256 \
     --teacher_model ${FT_BERT_BASE_DIR} \
     --student_model ${TMP_TINYBERT_DIR} \
     --data_dir ${TASK_DIR} \
