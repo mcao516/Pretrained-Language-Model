@@ -829,6 +829,8 @@ def main():
                         default=None)           
     parser.add_argument('--initialize_student_embedding',
                         action='store_true')
+    parser.add_argument('--only_pretrained_features',
+                        action='store_true')
     
     args = parser.parse_args()
     logger.info('The args: {}'.format(args))
@@ -1013,10 +1015,14 @@ def main():
             """
             # sampled_logits: [n_examples, hidden_size]
             # teacher_logits, student_logits: [batch_size, hidden_size]
-            queue_logits = torch.norm(queue_logits, p=2, dim=1, keepdim=True).detach()
-            teacher_logits = torch.norm(teacher_logits, p=2, dim=1, keepdim=True).detach()
-            student_logits = torch.norm(student_logits, p=2, dim=1, keepdim=True)
+            tn = torch.norm(teacher_logits, p=2, dim=1, keepdim=True).detach()
+            sn = torch.norm(student_logits, p=2, dim=1, keepdim=True).detach()
+            qn = torch.norm(queue_logits, p=2, dim=1, keepdim=True).detach()
 
+            teacher_logits = teacher_logits.div(tn.expand_as(teacher_logits))
+            student_logits = student_logits.div(sn.expand_as(student_logits))
+            queue_logits = queue_logits.div(qn.expand_as(queue_logits))
+            
             tt_product = torch.matmul(teacher_logits, queue_logits.T) / temperature
             st_product = torch.matmul(student_logits, queue_logits.T) / temperature
 
@@ -1048,14 +1054,22 @@ def main():
 
                 # teacher_logits, student_logits: [batch_size, label_num]
                 # student_pooled, teacher_pooled: [batch_size, hidden_size]
-                student_logits, student_atts, student_reps, _ = student_model(
-                    input_ids, segment_ids, input_mask, is_student=True
-                )
 
-                with torch.no_grad():
-                    teacher_logits, teacher_atts, teacher_reps, _ = teacher_model(
-                        input_ids, segment_ids, input_mask
-                    )
+                if args.only_pretrained_features:
+                    _, _, student_pretrained_pooled = student_model(
+                        input_ids, segment_ids, input_mask, only_pretrained_features=True)
+
+                    with torch.no_grad():
+                        _, _, teacher_pretrained_pooled = teacher_model(
+                            input_ids, segment_ids, input_mask, only_pretrained_features=True)
+
+                else:
+                    student_logits, student_atts, student_reps, _ = student_model(
+                        input_ids, segment_ids, input_mask, is_student=True)
+
+                    with torch.no_grad():
+                        teacher_logits, teacher_atts, teacher_reps, _ = teacher_model(
+                            input_ids, segment_ids, input_mask)
 
                 if args.pred_distill:
                     if output_mode == "classification":
@@ -1071,18 +1085,33 @@ def main():
                     sampled_ids, sampled_mask, sampled_seg, _, _ = sample_examples(
                         train_data, args.sample_n_example
                     )
-                    with torch.no_grad():
-                        sampled_logits, _, _, sampled_pooled = teacher_model(
-                            sampled_ids, sampled_seg, sampled_mask
-                    )
 
-                    loss = seed_loss(teacher_logits,
-                                     student_logits,
-                                     sampled_logits,
-                                     temperature=1.0,
-                                     lambda_a=1.0,
-                                     lambda_c=1.0)
+                    if args.only_pretrained_features:
+                        with torch.no_grad():
+                            _, _, sampled_pretrained_pooled = teacher_model(
+                                sampled_ids,
+                                sampled_seg,
+                                sampled_mask,
+                                only_pretrained_features=True
+                            )
+                        
+                        loss = seed_loss(teacher_pretrained_pooled,
+                                         student_pretrained_pooled,
+                                         sampled_pretrained_pooled,
+                                         temperature=1.0,
+                                         lambda_a=1.0,
+                                         lambda_c=1.0)
+                    else:
+                        with torch.no_grad():
+                            sampled_logits, _, _, sampled_pooled = teacher_model(
+                                sampled_ids, sampled_seg, sampled_mask)
 
+                        loss = seed_loss(teacher_logits,
+                                         student_logits,
+                                         sampled_logits,
+                                         temperature=1.0,
+                                         lambda_a=1.0,
+                                         lambda_c=1.0)
                 else:
                     # intermediate layer distillation
                     att_loss, rep_loss = 0.0, 0.0
@@ -1136,9 +1165,8 @@ def main():
                     student_model.eval()
 
                     result = {}
-                    if args.pred_distill or args.similarity_distill:
-                        result = do_eval(student_model, task_name, eval_dataloader,
-                                         device, output_mode, eval_labels, num_labels)
+                    result = do_eval(student_model, task_name, eval_dataloader,
+                                     device, output_mode, eval_labels, num_labels)
                     result['global_step'] = global_step
                     result['loss'] = tr_loss / (step + 1)
                     result_to_file(result, output_eval_file)

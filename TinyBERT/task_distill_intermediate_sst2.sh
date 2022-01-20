@@ -6,12 +6,15 @@ CLUSTER_NUM=2
 FT_BERT_BASE_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
 GENERAL_TINYBERT_DIR=$SCRATCH/General_TinyBERT_6L_768D
 TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
-TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/intermediate-${CLUSTER_NUM}-test
+TMP_TINYBERT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/intermediate-simp128
 
 mkdir $TMP_TINYBERT_DIR
     # --aug_train \
     # --init_student_from_scratch \
 python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
+    --only_pretrained_features \
+    --similarity_distill \
+    --sample_n_example 128 \
     --teacher_model ${FT_BERT_BASE_DIR} \
     --student_model ${GENERAL_TINYBERT_DIR} \
     --data_dir ${TASK_DIR} \
@@ -20,7 +23,7 @@ python $HOME/Pretrained-Language-Model/TinyBERT/task_distill.py \
     --max_seq_length 128 \
     --train_batch_size 256 \
     --num_train_epochs 10 \
-    --eval_step 300 \
+    --eval_step 200 \
     --do_lower_case \
     --k ${CLUSTER_NUM} \
     --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLUSTER_NUM}.json;

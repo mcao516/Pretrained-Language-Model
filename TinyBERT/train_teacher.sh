@@ -1,8 +1,8 @@
 #!/bin/bash
 source ~/env37/bin/activate
 
-TASK_NAME=MRPC
-CLUSTER_NUM=128
+TASK_NAME=SST-2
+CLUSTER_NUM=2
 BERT_BASE_DIR=$SCRATCH/huggingface/bert-base-uncased
 TASK_DIR=$SCRATCH/glue_data/${TASK_NAME}
 OUTPUT_DIR=$SCRATCH/TinyBERT_TEST/${TASK_NAME}/teacher-${CLUSTER_NUM}
@@ -21,4 +21,4 @@ python $HOME/Pretrained-Language-Model/TinyBERT/train_teacher.py \
     --max_seq_length 128 \
     --train_batch_size 128 \
     --k ${CLUSTER_NUM} \
-    --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_mrpc_k${CLUSTER_NUM}.json;
+    --cluster_map_path $HOME/Pretrained-Language-Model/TinyBERT/clusters/cluster_sst2_k${CLUSTER_NUM}.json;
